@@ -19,6 +19,8 @@ services:
     image: ghcr.io/hacucoo/ebook-sender:latest
     restart: unless-stopped
     user: "1000:1000"          # owner of the files in the drop folder
+    environment:
+      TZ: Europe/Berlin         # times in the UI
     ports:
       - 8095:8080
     volumes:

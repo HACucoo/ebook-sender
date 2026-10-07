@@ -5,6 +5,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DATA_DIR=/data \
     IMPORT_DIR=/import
 
+# Time zone data, so TZ=Europe/Berlin in compose gives local times in the UI
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata     && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /srv
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
