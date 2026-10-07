@@ -204,27 +204,12 @@ def scan_now(request: Request):
     return _back(request)
 
 
-@app.post("/settings")
-def save_settings(
-    smtp_host: str = Form(""),
-    smtp_port: int = Form(587),
-    smtp_user: str = Form(""),
-    smtp_password: str = Form(""),
-    smtp_security: str = Form("starttls"),
-    sender: str = Form(""),
-    scan_minutes: int = Form(5),
-    goodreads_minutes: int = Form(60),
-    min_age_seconds: int = Form(120),
-    max_mb: int = Form(23),
-    fetch_enabled: str = Form(""),
-    hydra_url: str = Form(""),
-    hydra_api_key: str = Form(""),
-    sab_url: str = Form(""),
-    sab_api_key: str = Form(""),
-    sab_category: str = Form("ebooks"),
-    fetch_retry_hours: int = Form(12),
-    fetch_max_mb: int = Form(50),
-):
+def _save_settings(
+    smtp_host: str, smtp_port: int, smtp_user: str, smtp_password: str, smtp_security: str, sender: str,
+    scan_minutes: int, goodreads_minutes: int, min_age_seconds: int, max_mb: int, fetch_enabled: str,
+    hydra_url: str, hydra_api_key: str, sab_url: str, sab_api_key: str, sab_category: str,
+    fetch_retry_hours: int, fetch_max_mb: int,
+) -> None:
     s = settings_store.load()
     s.smtp_host, s.smtp_port, s.smtp_user = smtp_host.strip(), smtp_port, smtp_user.strip()
     if smtp_password:  # empty field = keep the stored password
@@ -245,33 +230,65 @@ def save_settings(
     s.fetch_retry_hours = max(1, fetch_retry_hours)
     s.fetch_max_mb = max(1, fetch_max_mb)
     settings_store.save(s)
+
+
+# One form, three buttons: save, test mail, test fetching. The tests save
+# first, so they check what is in the form, not what was saved before.
+@app.post("/settings")
+async def save_settings(
+    smtp_host: str = Form(""),
+    smtp_port: int = Form(587),
+    smtp_user: str = Form(""),
+    smtp_password: str = Form(""),
+    smtp_security: str = Form("starttls"),
+    sender: str = Form(""),
+    scan_minutes: int = Form(5),
+    goodreads_minutes: int = Form(60),
+    min_age_seconds: int = Form(120),
+    max_mb: int = Form(23),
+    fetch_enabled: str = Form(""),
+    hydra_url: str = Form(""),
+    hydra_api_key: str = Form(""),
+    sab_url: str = Form(""),
+    sab_api_key: str = Form(""),
+    sab_category: str = Form("ebooks"),
+    fetch_retry_hours: int = Form(12),
+    fetch_max_mb: int = Form(50),
+    action: str = Form("save"),
+):
+    _save_settings(
+        smtp_host, smtp_port, smtp_user, smtp_password, smtp_security, sender, scan_minutes,
+        goodreads_minutes, min_age_seconds, max_mb, fetch_enabled, hydra_url, hydra_api_key,
+        sab_url, sab_api_key, sab_category, fetch_retry_hours, fetch_max_mb,
+    )
+    if action == "test_mail":
+        try:
+            await run_in_threadpool(Mailer(settings_store.load()).test)
+            result = "ok"
+        except Exception as err:
+            result = f"Fehler: {err}"
+        return RedirectResponse(f"/settings?saved=1&test={quote(result)}", status_code=303)
+    if action == "test_fetch":
+        result = await _test_fetch()
+        return RedirectResponse(f"/settings?saved=1&fetchtest={quote(result)}#beschaffung", status_code=303)
+    worker.poke(goodreads_too=True)
     return RedirectResponse("/settings?saved=1", status_code=303)
 
 
-@app.post("/settings/test")
-async def test_mail():
-    try:
-        await run_in_threadpool(Mailer(settings_store.load()).test)
-        result = "ok"
-    except Exception as err:
-        result = f"Fehler: {err}"
-    return RedirectResponse(f"/settings?test={result}", status_code=303)
-
-
-@app.post("/settings/fetchtest")
-async def test_fetch():
-    hydra, sab = worker.clients(settings_store.load())
+async def _test_fetch() -> str:
+    settings = settings_store.load()
+    hydra, sab = worker.clients(settings)
     try:
         await run_in_threadpool(hydra.test)
-        categories = await run_in_threadpool(sab.test)
-        category = settings_store.load().sab_category
-        if category in categories:
-            result = "ok"
-        else:
-            result = f"SABnzbd kennt keine Kategorie {category!r} (vorhanden: {', '.join(categories)})"
     except FetchError as err:
-        result = f"Fehler: {err}"
-    return RedirectResponse(f"/settings?fetchtest={quote(result)}#beschaffung", status_code=303)
+        return f"NZBHydra2: {err}"
+    try:
+        categories = await run_in_threadpool(sab.test)
+    except FetchError as err:
+        return f"SABnzbd: {err}"
+    if settings.sab_category not in categories:
+        return f"SABnzbd kennt keine Kategorie {settings.sab_category!r} (vorhanden: {', '.join(categories)})"
+    return "ok"
 
 
 def _language(value: str) -> str:

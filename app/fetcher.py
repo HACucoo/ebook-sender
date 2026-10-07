@@ -31,14 +31,20 @@ class FetchError(Exception):
     pass
 
 
+def _hide_key(text: str) -> str:
+    """Never let an API key from a URL end up in the UI or the log."""
+    return re.sub(r"apikey=[^&\s'\"]+", "apikey=…", text)
+
+
 def _get(url: str) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    if not url.startswith(("http://", "https://")):
+        raise FetchError("Adresse fehlt oder beginnt nicht mit http:// bzw. https://")
     try:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             return resp.read()
-    except OSError as err:
-        # Never let an API key from the URL end up in the UI or the log
-        raise FetchError(re.sub(r"apikey=[^&\s]+", "apikey=…", str(err))) from err
+    except (OSError, ValueError) as err:
+        raise FetchError(_hide_key(str(err))) from None
 
 
 @dataclass

@@ -31,3 +31,15 @@ def test_pages_and_api(epub_factory):
     assert status["pending"] == 1 and status["users"][0]["name"] == "Stephan"
     user_id = status["users"][0]["id"]
     assert client.get(f"/users/{user_id}").status_code == 200
+
+
+def test_fetch_test_saves_first_and_never_errors():
+    client = TestClient(main.app)
+    r = client.post("/settings", data={"smtp_host": "mail", "sender": "nas@example.com", "hydra_url": "",
+                                       "hydra_api_key": "SECRETKEY123", "sab_url": "not a url",
+                                       "action": "test_fetch"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert "fetchtest=" in r.headers["location"] and "SECRETKEY123" not in r.headers["location"]
+    assert main.settings_store.load().hydra_api_key == "SECRETKEY123"  # saved before testing
+    page = client.get(r.headers["location"])
+    assert page.status_code == 200 and "NZBHydra2: Adresse fehlt" in page.text

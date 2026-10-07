@@ -91,9 +91,9 @@
   <div class="row">
     <span class="meta">Die Absender-Adresse muss beim Reader (z. B. Kindle) als erlaubt eingetragen sein.</span>
     <span>
-      <button type="submit">Speichern</button>
-      <button type="submit" class="secondary" formaction="/settings/test">Anmeldung testen</button>
-      <button type="submit" class="secondary" formaction="/settings/fetchtest">Beschaffung testen</button>
+      <button type="submit" name="action" value="save">Speichern</button>
+      <button type="submit" name="action" value="test_mail" class="secondary">Speichern + Mail testen</button>
+      <button type="submit" name="action" value="test_fetch" class="secondary">Speichern + Beschaffung testen</button>
     </span>
   </div>
 </form>
