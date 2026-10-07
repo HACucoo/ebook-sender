@@ -31,8 +31,9 @@ def user_id(value: str) -> str | None:
 
 
 def shelf_from_url(value: str) -> str | None:
-    query = urllib.parse.urlparse(value or "").query
-    return (urllib.parse.parse_qs(query).get("shelf") or [None])[0]
+    """The shelf in a list link: ?shelf=… or, for shelves you made yourself, ?tag=…"""
+    params = urllib.parse.parse_qs(urllib.parse.urlparse(value or "").query)
+    return (params.get("shelf") or params.get("tag") or [None])[0]
 
 
 def parse_feed(xml: bytes) -> list[dict]:

@@ -14,6 +14,8 @@ def test_user_id_from_urls():
     assert goodreads.user_id("4711") == "4711"
     assert goodreads.user_id("https://example.com") is None
     assert goodreads.shelf_from_url("https://www.goodreads.com/review/list/777?shelf=kindle") == "kindle"
+    assert goodreads.shelf_from_url("https://www.goodreads.com/review/list/777-name?tag=to-grab") == "to-grab"
+    assert goodreads.user_id("https://www.goodreads.com/review/list/777-name?tag=to-grab") == "777"
 
 
 def test_parse_feed():
