@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="status">
+  <div>
+    Letzter Scan: {{ worker.last_scan | when }}
+    {% if not settings.mail_ready %} · <a href="/settings">Mailversand einrichten</a>{% endif %}
+    {% if not settings.users %} · <a href="/settings#benutzer">Benutzer anlegen</a>{% endif %}
+    {% if worker.last_error %}<div class="error">{{ worker.last_error }}</div>{% endif %}
+  </div>
+  <form method="post" action="/scan"><button type="submit">Jetzt prüfen</button></form>
+</section>
+
+<h2>Wartet <span class="count">{{ pending | length }}</span></h2>
+{% if pending %}
+  <p class="hint">Diese Bücher stehen auf keiner Goodreads-Liste (oder der Versand ging schief). Empfänger anhaken und senden.</p>
+  {% for book in pending %}{% include "_book.html" %}{% endfor %}
+{% else %}
+  <p class="empty">Nichts offen.</p>
+{% endif %}
+
+<h2>Verschickt</h2>
+{% if sent %}
+  {% for book in sent %}{% include "_book.html" %}{% endfor %}
+{% else %}
+  <p class="empty">Noch nichts verschickt.</p>
+{% endif %}
+
+{% if ignored %}
+<details>
+  <summary>Ausgeblendet ({{ ignored | length }})</summary>
+  {% for book in ignored %}{% include "_book.html" %}{% endfor %}
+</details>
+{% endif %}
+{% endblock %}

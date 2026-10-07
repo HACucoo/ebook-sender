@@ -1,0 +1,35 @@
+{# One book row; `book` and `settings` come from the including page #}
+<article class="book status-{{ book.status }}">
+  <div class="cover">
+    {% if book.has_cover %}<img src="/covers/{{ book.id }}" alt="" loading="lazy" onerror="this.remove()">{% else %}<span>📖</span>{% endif %}
+  </div>
+  <div class="info">
+    <div class="title">{{ book.title or book.filename }}</div>
+    <div class="meta">
+      {% if book.author %}{{ book.author }} · {% endif %}{{ (book.size / 1024) | round | int }} KB
+      · <span class="badge">{{ status_label.get(book.status, book.status) }}</span>
+    </div>
+    {% if book.sent_to %}
+      <div class="meta">an {% for s in book.sent_to %}{{ s.name }}{% if not loop.last %}, {% endif %}{% endfor %} · {{ book.sent_to[-1].at | when }}</div>
+    {% elif book.status != 'sent' %}
+      <div class="meta">gefunden {{ book.found_at | when }}{% if book.matched %} · passt zu {% for uid in book.matched %}{{ settings.user(uid).name if settings.user(uid) else uid }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</div>
+    {% endif %}
+    {% if book.error %}<div class="error">{{ book.error }}</div>{% endif %}
+  </div>
+  <div class="actions">
+    {% if book.status in ('unassigned', 'error') and settings.users %}
+      <form method="post" action="/books/{{ book.id }}/send" class="assign">
+        {% for u in settings.users %}
+          <label><input type="checkbox" name="user" value="{{ u.id }}" {% if u.id in book.matched %}checked{% endif %}> {{ u.name }}</label>
+        {% endfor %}
+        <button type="submit">Senden</button>
+      </form>
+    {% endif %}
+    {% if book.status in ('unassigned', 'error', 'too_large') %}
+      <form method="post" action="/books/{{ book.id }}/ignore"><button class="secondary" type="submit">Ausblenden</button></form>
+    {% elif book.status == 'ignored' %}
+      <form method="post" action="/books/{{ book.id }}/restore"><button class="secondary" type="submit">Wieder aufnehmen</button></form>
+      <form method="post" action="/books/{{ book.id }}/forget"><button class="secondary" type="submit">Vergessen</button></form>
+    {% endif %}
+  </div>
+</article>

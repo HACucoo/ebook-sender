@@ -1,0 +1,13 @@
+services:
+  ebook-sender:
+    image: ghcr.io/hacucoo/ebook-sender:latest
+    restart: unless-stopped
+    # Owner of the files in the drop folder (stephan = 1000 on tortuga)
+    user: "1000:1000"
+    ports:
+      - 8095:8080
+    volumes:
+      - /mnt/docker-data/ebook-sender:/data
+      # The folder the PC drops EPUBs into (unchanged from the old script)
+      - /pfad/zum/ablageordner:/import
+networks: {}

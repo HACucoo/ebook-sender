@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ user.name }} – E-Book-Versand{% endblock %}
+{% block content %}
+<p><a href="/settings#benutzer">← Einstellungen</a></p>
+<h2>{{ user.name }}</h2>
+<p class="meta">{{ user.email }} · Goodreads-Liste „{{ user.shelf }}“ · Stand {{ at | when }}</p>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+<h3>Bekommen <span class="count">{{ received | length }}</span></h3>
+{% if received %}
+  <ul class="plain">{% for b in received %}<li>{{ b.title }}{% if b.author %} · {{ b.author }}{% endif %} <span class="meta">{{ b.updated_at | when }}</span></li>{% endfor %}</ul>
+{% else %}<p class="empty">Noch nichts.</p>{% endif %}
+
+<h3>Auf der Liste <span class="count">{{ shelf | length }}</span></h3>
+<div class="shelf">
+{% for e in shelf %}
+  <div class="shelf-item {% if e.received %}received{% endif %}" title="{{ e.title }}">
+    {% if e.image %}<img src="{{ e.image }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% endif %}
+    <div class="t">{{ e.title }}</div>
+    <div class="meta">{{ e.author or '' }}{% if e.received %} · ✓ verschickt{% endif %}</div>
+  </div>
+{% else %}
+  <p class="empty">Die Liste ist leer oder wurde noch nicht abgerufen.</p>
+{% endfor %}
+</div>
+{% endblock %}

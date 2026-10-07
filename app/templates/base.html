@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}E-Book-Versand{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css?v={{ version }}">
+</head>
+<body>
+<header>
+  <a class="brand" href="/">📚 E-Book-Versand</a>
+  <nav>
+    <a href="/" {% if request.url.path == '/' %}class="active"{% endif %}>Bücher</a>
+    <a href="/settings" {% if request.url.path.startswith('/settings') %}class="active"{% endif %}>Einstellungen</a>
+  </nav>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+<footer>ebook-sender {{ version }}</footer>
+</body>
+</html>

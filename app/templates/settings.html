@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen – E-Book-Versand{% endblock %}
+{% block content %}
+{% if saved %}<p class="notice">Gespeichert.</p>{% endif %}
+{% if test %}<p class="notice {% if test != 'ok' %}error{% endif %}">Mail-Test: {{ 'Anmeldung klappt.' if test == 'ok' else test }}</p>{% endif %}
+
+<h2 id="benutzer">Benutzer</h2>
+<p class="hint">Jedes Buch im Ablageordner wird mit den Goodreads-Listen abgeglichen und an alle Benutzer geschickt, auf deren Liste es steht. Das Goodreads-Profil muss öffentlich sein. Als Goodreads-Angabe reicht der Link zum Profil oder zur Liste.</p>
+
+{% for u in settings.users %}
+<form method="post" action="/users/{{ u.id }}" class="card user">
+  <div class="grid">
+    <label>Name <input name="name" value="{{ u.name }}" required></label>
+    <label>E-Mail (Reader) <input name="email" type="email" value="{{ u.email }}" required></label>
+    <label>Goodreads <input name="goodreads_url" value="{{ u.goodreads }}" placeholder="https://www.goodreads.com/user/show/12345-name"></label>
+    <label>Liste <input name="shelf" value="{{ u.shelf }}" placeholder="to-read"></label>
+  </div>
+  <div class="row">
+    <span class="meta">
+      {% set info = shelf_info[u.id] %}
+      {% if info.error %}<span class="error">{{ info.error }}</span>
+      {% elif u.goodreads %}{{ info.count }} Bücher auf der Liste · Stand {{ info.at | when }} · <a href="/users/{{ u.id }}">Liste ansehen</a>
+      {% else %}ohne Goodreads – nur manuelle Zuordnung{% endif %}
+    </span>
+    <span>
+      <button type="submit">Speichern</button>
+      <button type="submit" class="secondary" formaction="/users/{{ u.id }}/delete" onclick="return confirm('{{ u.name }} löschen?')">Löschen</button>
+    </span>
+  </div>
+</form>
+{% endfor %}
+
+<form method="post" action="/users" class="card user new">
+  <div class="grid">
+    <label>Name <input name="name" required></label>
+    <label>E-Mail (Reader) <input name="email" type="email" required></label>
+    <label>Goodreads <input name="goodreads_url" placeholder="https://www.goodreads.com/user/show/12345-name"></label>
+    <label>Liste <input name="shelf" value="to-read"></label>
+  </div>
+  <div class="row"><span class="meta">Neuer Benutzer</span><button type="submit">Hinzufügen</button></div>
+</form>
+
+<h2>Mailversand</h2>
+<form method="post" action="/settings" class="card">
+  <div class="grid">
+    <label>SMTP-Server <input name="smtp_host" value="{{ settings.smtp_host }}"></label>
+    <label>Port <input name="smtp_port" type="number" value="{{ settings.smtp_port }}"></label>
+    <label>Verschlüsselung
+      <select name="smtp_security">
+        {% for v, l in [('starttls', 'STARTTLS'), ('ssl', 'SSL/TLS'), ('none', 'keine')] %}
+          <option value="{{ v }}" {% if settings.smtp_security == v %}selected{% endif %}>{{ l }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Absender <input name="sender" type="email" value="{{ settings.sender }}"></label>
+    <label>Benutzername <input name="smtp_user" value="{{ settings.smtp_user }}" autocomplete="off"></label>
+    <label>Passwort <input name="smtp_password" type="password" placeholder="{{ 'gespeichert – leer lassen zum Behalten' if settings.smtp_password else '' }}" autocomplete="new-password"></label>
+  </div>
+  <h3>Ablauf</h3>
+  <div class="grid">
+    <label>Ordner prüfen alle (min) <input name="scan_minutes" type="number" min="1" value="{{ settings.scan_minutes }}"></label>
+    <label>Goodreads abrufen alle (min) <input name="goodreads_minutes" type="number" min="10" value="{{ settings.goodreads_minutes }}"></label>
+    <label>Datei gilt als fertig nach (s) <input name="min_age_seconds" type="number" min="0" value="{{ settings.min_age_seconds }}"></label>
+    <label>Größte Mail (MB) <input name="max_mb" type="number" min="1" value="{{ settings.max_mb }}"></label>
+  </div>
+  <div class="row">
+    <span class="meta">Die Absender-Adresse muss beim Reader (z. B. Kindle) als erlaubt eingetragen sein.</span>
+    <span>
+      <button type="submit">Speichern</button>
+      <button type="submit" class="secondary" formaction="/settings/test">Anmeldung testen</button>
+    </span>
+  </div>
+</form>
+{% endblock %}
