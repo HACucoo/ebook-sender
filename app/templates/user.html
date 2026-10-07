@@ -3,7 +3,8 @@
 {% block content %}
 <p><a href="/settings#benutzer">← Einstellungen</a></p>
 <h2>{{ user.name }}</h2>
-<p class="meta">{{ user.email }} · Goodreads-Liste „{{ user.shelf }}“ · Stand {{ at | when }}</p>
+<p class="meta">{{ user.email }} · Goodreads-Liste „{{ user.shelf }}“ · Stand {{ at | when }}
+  {% if settings.fetch_ready and user.fetch %} · besorgt neue Einträge ({{ language_label[user.language] }}){% endif %}</p>
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
 <h3>Bekommen <span class="count">{{ received | length }}</span></h3>
@@ -18,6 +19,19 @@
     {% if e.image %}<img src="{{ e.image }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% endif %}
     <div class="t">{{ e.title }}</div>
     <div class="meta">{{ e.author or '' }}{% if e.received %} · ✓ verschickt{% endif %}</div>
+    {% set w = e.wanted %}
+    {% if w and not e.received %}
+      <div class="meta"><span class="badge">{{ wanted_label[w.status] }}</span></div>
+      {% if w.error %}<div class="meta">{{ w.error }}</div>{% endif %}
+      {% if settings.fetch_ready %}
+        {% if w.status in ('baseline', 'skipped') or (w.status == 'wanted' and w.last_search) %}
+          <form method="post" action="/wanted/{{ user.id }}/{{ e.book_id }}/request"><button class="small" type="submit">{{ 'Erneut suchen' if w.status == 'wanted' else 'Besorgen' }}</button></form>
+        {% endif %}
+        {% if w.status in ('wanted', 'grabbed') %}
+          <form method="post" action="/wanted/{{ user.id }}/{{ e.book_id }}/skip"><button class="small secondary" type="submit">Nicht besorgen</button></form>
+        {% endif %}
+      {% endif %}
+    {% endif %}
   </div>
 {% else %}
   <p class="empty">Die Liste ist leer oder wurde noch nicht abgerufen.</p>

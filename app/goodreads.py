@@ -99,12 +99,16 @@ def normalize(text: str | None) -> str:
     return " ".join(words)
 
 
-def core_title(title: str | None) -> str:
-    """Without subtitle and series: 'Iron Flame (Flammengeküsst 2)' → 'iron flame'."""
+def core_title_raw(title: str | None) -> str:
+    """Without subtitle and series, but as written: for search queries."""
     if not title:
         return ""
-    title = re.split(r"\s*[:(\[]|\s+[-–—]\s+", title, maxsplit=1)[0]
-    return normalize(title)
+    return re.split(r"\s*[:(\[]|\s+[-–—]\s+", title, maxsplit=1)[0].strip()
+
+
+def core_title(title: str | None) -> str:
+    """Without subtitle and series: 'Iron Flame (Flammengeküsst 2)' → 'iron flame'."""
+    return normalize(core_title_raw(title))
 
 
 def surname(author: str | None) -> str:

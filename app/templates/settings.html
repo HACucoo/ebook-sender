@@ -2,6 +2,7 @@
 {% block title %}Einstellungen – E-Book-Versand{% endblock %}
 {% block content %}
 {% if saved %}<p class="notice">Gespeichert.</p>{% endif %}
+{% if fetchtest %}<p class="notice {% if fetchtest != 'ok' %}error{% endif %}">Beschaffung: {{ 'NZBHydra2 und SABnzbd antworten, Kategorie vorhanden.' if fetchtest == 'ok' else fetchtest }}</p>{% endif %}
 {% if test %}<p class="notice {% if test != 'ok' %}error{% endif %}">Mail-Test: {{ 'Anmeldung klappt.' if test == 'ok' else test }}</p>{% endif %}
 
 <h2 id="benutzer">Benutzer</h2>
@@ -14,6 +15,12 @@
     <label>E-Mail (Reader) <input name="email" type="email" value="{{ u.email }}" required></label>
     <label>Goodreads <input name="goodreads_url" value="{{ u.goodreads }}" placeholder="https://www.goodreads.com/user/show/12345-name"></label>
     <label>Liste <input name="shelf" value="{{ u.shelf }}" placeholder="to-read"></label>
+    <label>Sprache beim Besorgen
+      <select name="language">
+        {% for v, l in language_label.items() %}<option value="{{ v }}" {% if u.language == v %}selected{% endif %}>{{ l }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="check"><input type="checkbox" name="fetch" value="1" {% if u.fetch %}checked{% endif %}> Neue Bücher der Liste besorgen</label>
   </div>
   <div class="row">
     <span class="meta">
@@ -36,6 +43,12 @@
     <label>E-Mail (Reader) <input name="email" type="email" required></label>
     <label>Goodreads <input name="goodreads_url" placeholder="https://www.goodreads.com/user/show/12345-name"></label>
     <label>Liste <input name="shelf" value="to-read"></label>
+    <label>Sprache beim Besorgen
+      <select name="language">
+        {% for v, l in language_label.items() %}<option value="{{ v }}" {% if v == 'any' %}selected{% endif %}>{{ l }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="check"><input type="checkbox" name="fetch" value="1" checked> Neue Bücher der Liste besorgen</label>
   </div>
   <div class="row"><span class="meta">Neuer Benutzer</span><button type="submit">Hinzufügen</button></div>
 </form>
@@ -56,6 +69,18 @@
     <label>Benutzername <input name="smtp_user" value="{{ settings.smtp_user }}" autocomplete="off"></label>
     <label>Passwort <input name="smtp_password" type="password" placeholder="{{ 'gespeichert – leer lassen zum Behalten' if settings.smtp_password else '' }}" autocomplete="new-password"></label>
   </div>
+  <h3 id="beschaffung">Beschaffung</h3>
+  <p class="hint">Neue Einträge auf den Goodreads-Listen werden über NZBHydra2 gesucht und an SABnzbd übergeben. Die SAB-Kategorie muss in den Ablageordner speichern – dann geht das fertige Buch wie jedes andere an seinen Benutzer. Was beim Einschalten schon auf einer Liste steht, wird nicht automatisch besorgt (in der Liste des Benutzers einzeln anforderbar).</p>
+  <div class="grid">
+    <label class="check"><input type="checkbox" name="fetch_enabled" value="1" {% if settings.fetch_enabled %}checked{% endif %}> Beschaffung eingeschaltet</label>
+    <label>NZBHydra2-Adresse <input name="hydra_url" value="{{ settings.hydra_url }}" placeholder="http://192.168.1.10:5076"></label>
+    <label>NZBHydra2-API-Schlüssel <input name="hydra_api_key" type="password" placeholder="{{ 'gespeichert – leer lassen zum Behalten' if settings.hydra_api_key else '' }}" autocomplete="off"></label>
+    <label>SABnzbd-Adresse <input name="sab_url" value="{{ settings.sab_url }}" placeholder="http://192.168.1.10:8085"></label>
+    <label>SABnzbd-API-Schlüssel <input name="sab_api_key" type="password" placeholder="{{ 'gespeichert – leer lassen zum Behalten' if settings.sab_api_key else '' }}" autocomplete="off"></label>
+    <label>SABnzbd-Kategorie <input name="sab_category" value="{{ settings.sab_category }}"></label>
+    <label>Erneut suchen nach (h) <input name="fetch_retry_hours" type="number" min="1" value="{{ settings.fetch_retry_hours }}"></label>
+    <label>Größter Download (MB) <input name="fetch_max_mb" type="number" min="1" value="{{ settings.fetch_max_mb }}"></label>
+  </div>
   <h3>Ablauf</h3>
   <div class="grid">
     <label>Ordner prüfen alle (min) <input name="scan_minutes" type="number" min="1" value="{{ settings.scan_minutes }}"></label>
@@ -68,6 +93,7 @@
     <span>
       <button type="submit">Speichern</button>
       <button type="submit" class="secondary" formaction="/settings/test">Anmeldung testen</button>
+      <button type="submit" class="secondary" formaction="/settings/fetchtest">Beschaffung testen</button>
     </span>
   </div>
 </form>

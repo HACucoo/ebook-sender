@@ -6,6 +6,7 @@ from datetime import datetime
 import logging
 from pathlib import Path
 import time
+from urllib.parse import quote
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
@@ -14,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import __version__, goodreads
+from .fetcher import FetchError
 from .mailer import Mailer
 from .store import (
     ERROR,
@@ -66,6 +68,14 @@ def _when(ts: float | None) -> str:
 templates.env.filters["when"] = _when
 templates.env.globals["status_label"] = STATUS_LABEL
 templates.env.globals["version"] = __version__
+templates.env.globals["wanted_label"] = {
+    "baseline": "war schon auf der Liste",
+    "wanted": "wird gesucht",
+    "grabbed": "wird geladen",
+    "done": "erledigt",
+    "skipped": "nicht besorgen",
+}
+templates.env.globals["language_label"] = {"de": "Deutsch", "en": "Englisch", "any": "egal"}
 
 
 def _back(request: Request, fallback: str = "/") -> RedirectResponse:
@@ -83,12 +93,13 @@ def index(request: Request):
         "pending": books.list(PENDING),
         "sent": books.list((SENT,), limit=50),
         "ignored": books.list((IGNORED,), limit=20),
+        "fetching": books.wanted(statuses=("wanted", "grabbed")),
         "worker": worker,
     })
 
 
 @app.get("/settings")
-def settings_page(request: Request, saved: str | None = None, test: str | None = None):
+def settings_page(request: Request, saved: str | None = None, test: str | None = None, fetchtest: str | None = None):
     settings = settings_store.load()
     shelf_info = {}
     for user in settings.users:
@@ -98,7 +109,7 @@ def settings_page(request: Request, saved: str | None = None, test: str | None =
             "at": books.meta(f"goodreads_at:{user.id}"),
         }
     return templates.TemplateResponse(request, "settings.html", {
-        "settings": settings, "shelf_info": shelf_info, "saved": saved, "test": test,
+        "settings": settings, "shelf_info": shelf_info, "saved": saved, "test": test, "fetchtest": fetchtest,
     })
 
 
@@ -111,10 +122,13 @@ def user_page(request: Request, user_id: str):
     sent_titles = {b["id"]: b for b in books.list((SENT,), limit=1000)}
     received = [b for b in sent_titles.values() if any(s["user"] == user_id for s in b["sent_to"])]
     shelf = books.shelf(user_id)
+    wanted = {w["book_id"]: w for w in books.wanted(user_id)}
     for entry in shelf:
         entry["received"] = any(goodreads.matches(b, entry) for b in received)
+        entry["wanted"] = wanted.get(entry["book_id"])
     return templates.TemplateResponse(request, "user.html", {
         "user": user,
+        "settings": settings,
         "shelf": shelf,
         "received": received,
         "error": books.meta(f"goodreads_error:{user_id}") or "",
@@ -168,6 +182,22 @@ def forget_book(request: Request, book_id: str):
     return _back(request)
 
 
+@app.post("/wanted/{user_id}/{book_id}/request")
+def request_book(request: Request, user_id: str, book_id: str):
+    """Fetch this shelf entry (again) at the next run."""
+    if books.wanted_get(user_id, book_id):
+        books.update_wanted(user_id, book_id, status="wanted", last_search=None, nzo_id=None, error=None)
+        worker.poke()
+    return _back(request)
+
+
+@app.post("/wanted/{user_id}/{book_id}/skip")
+def skip_book(request: Request, user_id: str, book_id: str):
+    if books.wanted_get(user_id, book_id):
+        books.update_wanted(user_id, book_id, status="skipped", error=None)
+    return _back(request)
+
+
 @app.post("/scan")
 def scan_now(request: Request):
     worker.poke(goodreads_too=True)
@@ -186,6 +216,14 @@ def save_settings(
     goodreads_minutes: int = Form(60),
     min_age_seconds: int = Form(120),
     max_mb: int = Form(23),
+    fetch_enabled: str = Form(""),
+    hydra_url: str = Form(""),
+    hydra_api_key: str = Form(""),
+    sab_url: str = Form(""),
+    sab_api_key: str = Form(""),
+    sab_category: str = Form("ebooks"),
+    fetch_retry_hours: int = Form(12),
+    fetch_max_mb: int = Form(50),
 ):
     s = settings_store.load()
     s.smtp_host, s.smtp_port, s.smtp_user = smtp_host.strip(), smtp_port, smtp_user.strip()
@@ -197,6 +235,15 @@ def save_settings(
     s.goodreads_minutes = max(10, goodreads_minutes)
     s.min_age_seconds = max(0, min_age_seconds)
     s.max_mb = max(1, max_mb)
+    s.fetch_enabled = bool(fetch_enabled)
+    s.hydra_url, s.sab_url = hydra_url.strip().rstrip("/"), sab_url.strip().rstrip("/")
+    if hydra_api_key:  # empty = keep
+        s.hydra_api_key = hydra_api_key.strip()
+    if sab_api_key:
+        s.sab_api_key = sab_api_key.strip()
+    s.sab_category = sab_category.strip() or "ebooks"
+    s.fetch_retry_hours = max(1, fetch_retry_hours)
+    s.fetch_max_mb = max(1, fetch_max_mb)
     settings_store.save(s)
     return RedirectResponse("/settings?saved=1", status_code=303)
 
@@ -211,23 +258,47 @@ async def test_mail():
     return RedirectResponse(f"/settings?test={result}", status_code=303)
 
 
+@app.post("/settings/fetchtest")
+async def test_fetch():
+    hydra, sab = worker.clients(settings_store.load())
+    try:
+        await run_in_threadpool(hydra.test)
+        categories = await run_in_threadpool(sab.test)
+        category = settings_store.load().sab_category
+        if category in categories:
+            result = "ok"
+        else:
+            result = f"SABnzbd kennt keine Kategorie {category!r} (vorhanden: {', '.join(categories)})"
+    except FetchError as err:
+        result = f"Fehler: {err}"
+    return RedirectResponse(f"/settings?fetchtest={quote(result)}#beschaffung", status_code=303)
+
+
+def _language(value: str) -> str:
+    return value if value in ("de", "en", "any") else "any"
+
+
 @app.post("/users")
-def add_user(name: str = Form(...), email: str = Form(...), goodreads_url: str = Form(""), shelf: str = Form("to-read")):
+def add_user(name: str = Form(...), email: str = Form(...), goodreads_url: str = Form(""), shelf: str = Form("to-read"),
+             language: str = Form("any"), fetch: str = Form("")):
     s = settings_store.load()
-    s.users.append(User(id=new_id(), name=name.strip(), email=email.strip(), goodreads=goodreads_url.strip(), shelf=shelf.strip() or "to-read"))
+    s.users.append(User(id=new_id(), name=name.strip(), email=email.strip(), goodreads=goodreads_url.strip(),
+                        shelf=shelf.strip() or "to-read", language=_language(language), fetch=bool(fetch)))
     settings_store.save(s)
     worker.poke(goodreads_too=True)
     return RedirectResponse("/settings?saved=1#benutzer", status_code=303)
 
 
 @app.post("/users/{user_id}")
-def update_user(user_id: str, name: str = Form(...), email: str = Form(...), goodreads_url: str = Form(""), shelf: str = Form("to-read")):
+def update_user(user_id: str, name: str = Form(...), email: str = Form(...), goodreads_url: str = Form(""), shelf: str = Form("to-read"),
+                language: str = Form("any"), fetch: str = Form("")):
     s = settings_store.load()
     user = s.user(user_id)
     if user is None:
         raise HTTPException(404)
     user.name, user.email = name.strip(), email.strip()
     user.goodreads, user.shelf = goodreads_url.strip(), shelf.strip() or "to-read"
+    user.language, user.fetch = _language(language), bool(fetch)
     settings_store.save(s)
     worker.poke(goodreads_too=True)
     return RedirectResponse("/settings?saved=1#benutzer", status_code=303)
@@ -239,6 +310,7 @@ def delete_user(user_id: str):
     s.users = [u for u in s.users if u.id != user_id]
     settings_store.save(s)
     books.drop_shelves_except([u.id for u in s.users])
+    books.drop_wanted_except([u.id for u in s.users])
     return RedirectResponse("/settings?saved=1#benutzer", status_code=303)
 
 
@@ -273,6 +345,20 @@ def api_books(status: str | None = None, limit: int = 30):
     })
 
 
+@app.get("/api/wanted")
+def api_wanted(status: str | None = None):
+    settings = settings_store.load()
+    names = {u.id: u.name for u in settings.users}
+    statuses = tuple(status.split(",")) if status else ("wanted", "grabbed")
+    return {"wanted": [
+        {"user": {"id": w["user_id"], "name": names.get(w["user_id"], w["user_id"])},
+         "goodreads_id": w["book_id"], "title": w["title"], "author": w["author"], "image": w["image"],
+         "status": w["status"], "release": w["release"], "attempts": w["attempts"],
+         "last_search": w["last_search"], "error": w["error"], "updated_at": w["updated_at"]}
+        for w in books.wanted(statuses=statuses)
+    ]}
+
+
 @app.get("/api/status")
 def api_status():
     settings = settings_store.load()
@@ -282,6 +368,12 @@ def api_status():
         "mail_ready": settings.mail_ready,
         "users": [{"id": u.id, "name": u.name, "shelf": len(books.shelf(u.id))} for u in settings.users],
         "pending": len(books.list(PENDING)),
+        "fetching": {
+            "enabled": settings.fetch_ready,
+            "wanted": len(books.wanted(statuses=("wanted",))),
+            "grabbed": len(books.wanted(statuses=("grabbed",))),
+            "last_error": worker.last_fetch_error,
+        },
         "last_scan": worker.last_scan or None,
         "last_error": worker.last_error,
     }

@@ -62,3 +62,8 @@ ul.plain { padding-left: 18px; }
   .book { flex-wrap: wrap; }
   .book .actions { width: 100%; justify-content: flex-start; }
 }
+
+label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--text); align-self: end; padding-bottom: 6px; }
+label.check input { width: auto; }
+button.small { padding: 3px 9px; font-size: .8rem; margin-top: 6px; }
+.shelf-item form { margin: 0; }

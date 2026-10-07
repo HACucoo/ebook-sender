@@ -15,6 +15,7 @@ import time
 
 from . import goodreads
 from .epub import read_epub
+from .fetcher import FetchError, Hydra, Sabnzbd, pick
 from .mailer import Mailer
 from .store import (
     DATA_DIR,
@@ -33,6 +34,9 @@ _LOGGER = logging.getLogger("ebook-sender")
 
 SENT_DIR = "versandt"
 ERROR_RETRY_SECONDS = 30 * 60
+SEARCHES_PER_RUN = 5          # be gentle with the indexers
+LOST_DOWNLOAD_SECONDS = 2 * 86400
+BOOK_SUFFIXES = {".epub", ".pdf", ".mobi", ".azw", ".azw3"}
 COVER_DIR = DATA_DIR / "covers"
 COVER_EXT = {"image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp"}
 
@@ -66,6 +70,7 @@ class Worker:
         self.last_scan = 0.0
         self.last_goodreads = 0.0
         self.last_error: str | None = None
+        self.last_fetch_error: str | None = None
 
     # ── loop ──
 
@@ -95,6 +100,8 @@ class Worker:
                 if now - self.last_scan >= settings.scan_minutes * 60:
                     self.last_scan = now
                     self.scan(settings)
+                    if settings.fetch_ready:
+                        self.fetch(settings)
                 self.last_error = None
             except Exception as err:  # keep the loop alive whatever happens
                 _LOGGER.exception("Worker run failed")
@@ -106,6 +113,7 @@ class Worker:
 
     def refresh_goodreads(self, settings: Settings) -> None:
         self.books.drop_shelves_except([u.id for u in settings.users])
+        self.books.drop_wanted_except([u.id for u in settings.users])
         for user in settings.users:
             if not user.goodreads:
                 self.books.set_shelf(user.id, [])
@@ -117,6 +125,12 @@ class Worker:
                 _LOGGER.warning("Goodreads for %s: %s", user.name, err)
                 continue
             self.books.set_shelf(user.id, entries)
+            # Only what is added from now on gets fetched; the first sync and
+            # anything added while fetching is off stays "baseline"
+            first = self.books.meta(f"wanted_synced:{user.id}") is None
+            fetch_new = settings.fetch_ready and user.fetch and not first
+            self.books.sync_wanted(user.id, entries, "wanted" if fetch_new else "baseline")
+            self.books.set_meta(f"wanted_synced:{user.id}", str(time.time()))
             self.books.set_meta(f"goodreads_error:{user.id}", "")
             self.books.set_meta(f"goodreads_at:{user.id}", str(time.time()))
         # Something waiting may have landed on a shelf in the meantime
@@ -224,6 +238,7 @@ class Worker:
                 return
             finally:
                 mailer.close()
+            self._mark_fetched(book, user_ids)
             target = self._move_to_sent(path)
             self.books.update(
                 book_id,
@@ -241,8 +256,83 @@ class Worker:
         if target.exists():
             target = sent_dir / f"{path.stem}-{int(time.time())}{path.suffix}"
         shutil.move(str(path), str(target))
-        # An emptied job folder from the PC is removed, like the old script did
+        # A job folder (from the PC or SABnzbd) goes once no book is left in it;
+        # SABnzbd leaves .nfo and cover files behind
         parent = path.parent
-        if parent != self.import_dir and parent.is_dir() and not any(parent.iterdir()):
-            parent.rmdir()
+        if parent != self.import_dir and parent.is_dir() and self.import_dir in parent.parents:
+            if not any(p.suffix.lower() in BOOK_SUFFIXES for p in parent.rglob("*") if p.is_file()):
+                shutil.rmtree(parent, ignore_errors=True)
         return target
+
+    # ── fetching via NZBHydra2 + SABnzbd ──
+
+    def _mark_fetched(self, book: dict, user_ids: list[str]) -> None:
+        """A sent book ends the hunt for it on these users' shelves."""
+        for uid in user_ids:
+            for entry in self.books.wanted(uid, ("wanted", "grabbed", "baseline")):
+                if goodreads.matches(book, entry):
+                    self.books.update_wanted(uid, entry["book_id"], status="done", error=None)
+
+    def clients(self, settings: Settings) -> tuple[Hydra, Sabnzbd]:
+        return (
+            Hydra(settings.hydra_url, settings.hydra_api_key),
+            Sabnzbd(settings.sab_url, settings.sab_api_key, settings.sab_category),
+        )
+
+    def fetch(self, settings: Settings) -> None:
+        hydra, sab = self.clients(settings)
+        try:
+            self._follow_downloads(sab)
+            self._search(settings, hydra, sab)
+            self.last_fetch_error = None
+        except FetchError as err:
+            self.last_fetch_error = str(err)
+            _LOGGER.warning("Fetching: %s", err)
+
+    def _follow_downloads(self, sab: Sabnzbd) -> None:
+        for entry in self.books.wanted(statuses=("grabbed",)):
+            if not entry["nzo_id"]:
+                continue
+            state = sab.status(entry["nzo_id"])
+            lost = state is None and time.time() - entry["updated_at"] > LOST_DOWNLOAD_SECONDS
+            if state == "failed" or lost:
+                blocked = [*entry["blocked"], entry["release"]]
+                self.books.update_wanted(
+                    entry["user_id"], entry["book_id"], status="wanted", nzo_id=None, blocked=blocked,
+                    last_search=None, error=f"Download fehlgeschlagen: {entry['release']}",
+                )
+            # completed: the book shows up in the drop folder and is marked done when sent
+
+    def _search(self, settings: Settings, hydra: Hydra, sab: Sabnzbd) -> None:
+        due_before = time.time() - settings.fetch_retry_hours * 3600
+        searched = 0
+        for entry in sorted(self.books.wanted(statuses=("wanted",)), key=lambda e: e["last_search"] or 0):
+            if searched >= SEARCHES_PER_RUN:
+                break
+            user = settings.user(entry["user_id"])
+            if user is None or not user.fetch:
+                continue
+            if entry["last_search"] and entry["last_search"] > due_before:
+                continue
+            searched += 1
+            self.search_one(entry, user.language, settings, hydra, sab)
+
+    def search_one(self, entry: dict, language: str, settings: Settings, hydra: Hydra, sab: Sabnzbd) -> bool:
+        releases = hydra.search(entry["title"], entry["author"])
+        release = pick(releases, entry["title"], entry["author"], language, settings.fetch_max_mb, set(entry["blocked"]))
+        now = time.time()
+        if release is None:
+            lang = {"de": "deutsch", "en": "englisch"}.get(language, "beliebig")
+            self.books.update_wanted(
+                entry["user_id"], entry["book_id"], last_search=now, attempts=entry["attempts"] + 1,
+                error=f"Nichts Passendes gefunden ({len(releases)} Treffer, Sprache {lang})",
+            )
+            return False
+        name = " - ".join(x for x in (entry["author"], goodreads.core_title_raw(entry["title"])) if x)
+        nzo_id = sab.add(release, name)
+        self.books.update_wanted(
+            entry["user_id"], entry["book_id"], status="grabbed", release=release.title, nzo_id=nzo_id,
+            last_search=now, attempts=entry["attempts"] + 1, error=None,
+        )
+        _LOGGER.info("Fetching %s for %s: %s", entry["title"], entry["user_id"], release.title)
+        return True

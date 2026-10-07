@@ -18,6 +18,26 @@
   <p class="empty">Nichts offen.</p>
 {% endif %}
 
+{% if fetching %}
+<h2>Wird besorgt <span class="count">{{ fetching | length }}</span></h2>
+{% for w in fetching %}
+<article class="book">
+  <div class="cover">{% if w.image %}<img src="{{ w.image }}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">{% else %}<span>🔎</span>{% endif %}</div>
+  <div class="info">
+    <div class="title">{{ w.title }}</div>
+    <div class="meta">{% if w.author %}{{ w.author }} · {% endif %}für {{ settings.user(w.user_id).name if settings.user(w.user_id) else w.user_id }} · <span class="badge">{{ wanted_label[w.status] }}</span></div>
+    {% if w.release %}<div class="meta">{{ w.release }}</div>{% endif %}
+    {% if w.error %}<div class="meta">{{ w.error }} · zuletzt gesucht {{ w.last_search | when }}</div>{% endif %}
+  </div>
+  <div class="actions">
+    <form method="post" action="/wanted/{{ w.user_id }}/{{ w.book_id }}/request"><button class="secondary" type="submit">Jetzt suchen</button></form>
+    <form method="post" action="/wanted/{{ w.user_id }}/{{ w.book_id }}/skip"><button class="secondary" type="submit">Nicht besorgen</button></form>
+  </div>
+</article>
+{% endfor %}
+{% endif %}
+{% if worker.last_fetch_error %}<p class="error">Beschaffung: {{ worker.last_fetch_error }}</p>{% endif %}
+
 <h2>Verschickt</h2>
 {% if sent %}
   {% for book in sent %}{% include "_book.html" %}{% endfor %}
