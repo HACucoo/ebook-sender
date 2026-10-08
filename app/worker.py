@@ -230,7 +230,7 @@ class Worker:
                     if user is None or uid in already:
                         continue
                     mailer.send(path, user.email, book["title"] or path.stem)
-                    sent_to.append({"user": uid, "name": user.name, "at": time.time()})
+                    sent_to.append({"user": uid, "name": user.name, "at": time.time(), **self._listing(book, uid)})
                     _LOGGER.info("Sent %s to %s", book["title"], user.name)
             except Exception as err:
                 self.books.update(book_id, status=ERROR, matched=user_ids, sent_to=sent_to, error=f"Versand fehlgeschlagen: {err}")
@@ -265,6 +265,21 @@ class Worker:
         return target
 
     # ── fetching via NZBHydra2 + SABnzbd ──
+
+    def _listing(self, book: dict, user_id: str) -> dict:
+        """Since when the book was on this user's shelf, and its Goodreads cover.
+
+        Goodreads' own "added" date counts; the day ebook-sender first saw the
+        entry is only the fallback. Nothing for a book on no shelf.
+        """
+        for entry in self.books.shelf(user_id):
+            if goodreads.matches(book, entry):
+                listed = goodreads.added_timestamp(entry.get("added_at"))
+                if listed is None:
+                    wanted = self.books.wanted_get(user_id, entry["book_id"])
+                    listed = wanted["created_at"] if wanted else None
+                return {"listed_at": listed, "image": entry.get("image")}
+        return {"listed_at": None, "image": None}
 
     def _mark_fetched(self, book: dict, user_ids: list[str]) -> None:
         """A sent book ends the hunt for it on these users' shelves."""

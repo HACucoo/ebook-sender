@@ -345,7 +345,12 @@ def _api_book(book: dict, settings) -> dict:
         "size": book["size"],
         "status": book["status"],
         "matched": [{"id": uid, "name": names.get(uid, uid)} for uid in book["matched"]],
-        "sent_to": [{"id": s["user"], "name": s.get("name") or names.get(s["user"], s["user"]), "at": s["at"]} for s in book["sent_to"]],
+        "sent_to": [
+            {"id": s["user"], "name": s.get("name") or names.get(s["user"], s["user"]), "at": s["at"],
+             # Since when it was on that user's Goodreads shelf (None: on no shelf), and the Goodreads cover
+             "listed_at": s.get("listed_at"), "image": s.get("image")}
+            for s in book["sent_to"]
+        ],
         "error": book["error"],
         "found_at": book["found_at"],
         "updated_at": book["updated_at"],

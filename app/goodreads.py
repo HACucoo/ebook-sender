@@ -6,6 +6,7 @@ The profile must be visible to everyone for this to work.
 """
 from __future__ import annotations
 
+from email.utils import parsedate_to_datetime
 import re
 import unicodedata
 import urllib.parse
@@ -134,6 +135,16 @@ def matches(book: dict, entry: dict) -> bool:
         return sa == sb
     # A book without an author in its metadata may still match on an exact title
     return a == b
+
+
+def added_timestamp(value: str | None) -> float | None:
+    """Goodreads' "added to shelf" date (RSS, RFC 822) as a timestamp."""
+    if not value:
+        return None
+    try:
+        return parsedate_to_datetime(value).timestamp()
+    except (TypeError, ValueError, IndexError):
+        return None
 
 
 def match_users(book: dict, shelves: list[dict]) -> list[str]:

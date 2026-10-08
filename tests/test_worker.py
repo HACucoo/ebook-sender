@@ -59,6 +59,20 @@ def test_routes_by_shelf_and_moves(env, epub_factory):
     assert len(FakeMailer.sent) == 3
 
 
+def test_sent_to_records_since_when_on_shelf(env, epub_factory):
+    w, books, imp = env
+    books.set_shelf("s", [{"book_id": "1", "title": "Project Hail Mary", "author": "Andy Weir",
+                           "added_at": "Mon, 21 Sep 2026 10:00:00 -0700", "image": "https://gr/img.jpg"}])
+    epub_factory(imp / "phm.epub", "Project Hail Mary", "Andy Weir")
+    w.scan()
+    [book] = books.list((SENT,))
+    by_user = {s["user"]: s for s in book["sent_to"]}
+    assert by_user["s"]["listed_at"] == 1790010000.0  # 2026-09-21 17:00 UTC
+    assert by_user["s"]["image"] == "https://gr/img.jpg"
+    # Daniela's shelf entry has no date and nothing in "wanted": unknown, not "now"
+    assert by_user["d"]["listed_at"] is None
+
+
 def test_unassigned_waits_then_manual_send(env, epub_factory):
     w, books, imp = env
     epub_factory(imp / "x.epub", "Unbekanntes Buch", "Niemand")
